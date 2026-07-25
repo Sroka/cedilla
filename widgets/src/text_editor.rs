@@ -559,6 +559,10 @@ pub struct State<Highlighter: text::Highlighter> {
     last_click: Option<cosmic::iced::daemon::program::graphics::core::mouse::Click>,
     drag_click: Option<cosmic::iced::daemon::program::graphics::core::mouse::click::Kind>,
     partial_scroll: f32,
+    /// Band-aid for duplicated IME commits on GNOME (libcosmic binds two
+    /// zwp_text_input_v3 objects; mutter delivers the composition to both).
+    /// Remembers the last commit so the echoed duplicate can be dropped.
+    last_commit: Option<(String, Instant)>,
     last_theme: RefCell<Option<String>>,
     highlighter: RefCell<Highlighter>,
     highlighter_settings: Highlighter::Settings,
@@ -631,6 +635,7 @@ where
             last_click: None,
             drag_click: None,
             partial_scroll: 0.0,
+            last_commit: None,
             last_theme: RefCell::default(),
             highlighter: RefCell::new(Highlighter::new(&self.highlighter_settings)),
             highlighter_settings: self.highlighter_settings.clone(),
@@ -809,9 +814,20 @@ where
                     Ime::Toggle(is_open) => {
                         state.preedit = is_open.then(input_method::Preedit::new);
 
+                        // New IME session we forget the previous commit.
+                        if is_open {
+                            state.last_commit = None;
+                        }
+
                         shell.request_redraw();
                     }
                     Ime::Preedit { content, selection } => {
+                        // A new (non-empty) composition has started, so the next
+                        // commit is legitimate even if its text matches the last one.
+                        if !content.is_empty() {
+                            state.last_commit = None;
+                        }
+
                         state.preedit = Some(input_method::Preedit {
                             content,
                             selection,
@@ -821,10 +837,21 @@ where
                         shell.request_redraw();
                     }
                     Ime::Commit(text) => {
-                        shell.publish(on_edit(Action::Edit(Edit::Paste(Arc::new(text)))));
+                        // Drop a byte-identical commit echoed within a few ms with no
+                        // new composition in between (duplicate text-input stream on
+                        // GNOME).
+                        let is_echo = state.last_commit.as_ref().is_some_and(|(prev, at)| {
+                            *prev == text && at.elapsed() < Duration::from_millis(50)
+                        });
+
+                        if !is_echo {
+                            shell.publish(on_edit(Action::Edit(Edit::Paste(Arc::new(text)))));
+                        }
                     }
                 },
                 Update::Binding(binding) => {
+                    state.last_commit = None;
+
                     fn apply_binding<H: text::Highlighter, R: text::Renderer, Message>(
                         binding: Binding<Message>,
                         content: &Content<R>,
