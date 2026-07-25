@@ -142,6 +142,14 @@
   </keywords>
 
   <releases>
+    <release version="0.1.9" date="2026-07-25">
+        <description>
+            <p>Fix carriage return behavior</p>
+            <p>Implement Ctrl+Backspace and Ctrl+Shfit+Backspace</p>
+            <p>Fix duplicate IME commits on Gnome</p>
+            <p>Updated dependencies</p>
+        </description>
+    </release>
     <release version="0.1.8" date="2026-07-04">
         <description>
             <p>Dialogs can now be dismissed using the Escape Key</p>
