@@ -21,6 +21,8 @@ mod ruby;
 mod table;
 mod typst;
 
+const COPY_ICON_BYTES: &[u8] = include_bytes!("../../resources/icons/bundled/edit-copy-symbolic.svg");
+
 // Add everything to one place
 pub trait ValidTheme:
     widget::button::Catalog
@@ -28,6 +30,8 @@ pub trait ValidTheme:
     + widget::rule::Catalog
     + widgets::text_editor::Catalog
     + widget::checkbox::Catalog
+    + cosmic::widget::svg::Catalog
+    + cosmic::widget::aspect_ratio::Catalog
 {
 }
 
@@ -37,6 +41,8 @@ impl<T> ValidTheme for T where
         + widget::rule::Catalog
         + widgets::text_editor::Catalog
         + widget::checkbox::Catalog
+        + cosmic::widget::svg::Catalog
+        + cosmic::widget::aspect_ratio::Catalog
 {
 }
 
@@ -568,25 +574,37 @@ impl<'a, M: Clone + 'static, T: ValidTheme + 'a> MarkWidget<'a, M, T> {
                 .on_action(on_action);
 
             if let Some(on_copy) = &self.fn_copying_code {
-                let copy_btn = widget::button(widget::text("Copy").size(14))
+                let icon = widget::svg(widget::svg::Handle::from_memory(COPY_ICON_BYTES))
+                        .width(16)
+                        .height(16);
+
+                    let copy_btn: Element<'a, M, T, cosmic::Renderer> = widget::mouse_area(
+                        widget::container(icon)
+                            .padding(4)
+                            .width(28)
+                            .height(28)
+                    )
                     .on_press(on_copy(code))
-                    .padding(4);
+                    .interaction(cosmic::iced::mouse::Interaction::Pointer)
+                    .into();
 
-                let overlay = widget::row![
-                    widget::space().width(Length::Fill),
-                    widget::column![
-                        copy_btn,
-                        widget::space().height(Length::Fill),
+                    let overlay: Element<'a, M, T, cosmic::Renderer> = widget::row![
+                        widget::space().width(Length::Fill),
+                        widget::column![
+                            copy_btn,
+                            widget::space().height(Length::Fill),
+                        ]
                     ]
-                ].padding(8);
+                    .padding(8)
+                    .into();
 
-                let highlighted_editor: Element<'_, _, _> = if let Some(language) = &self.current_code_language {
-                    editor.highlight(language, self.code_highlight_theme).into()
-                } else {
-                    editor.into()
-                };
+                    let highlighted_editor: Element<'a, M, T, cosmic::Renderer> = if let Some(language) = &self.current_code_language {
+                        editor.highlight(language, self.code_highlight_theme).into()
+                    } else {
+                        editor.into()
+                    };
 
-                widget::stack![highlighted_editor, overlay].into()
+                    widget::stack![highlighted_editor, overlay].into()
             } else {
                 if let Some(language) = &self.current_code_language {
                     editor.highlight(language, self.code_highlight_theme).into()
