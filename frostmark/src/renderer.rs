@@ -21,6 +21,8 @@ mod ruby;
 mod table;
 mod typst;
 
+const COPY_ICON_BYTES: &[u8] = include_bytes!("../../resources/icons/bundled/edit-copy-symbolic.svg");
+
 // Add everything to one place
 pub trait ValidTheme:
     widget::button::Catalog
@@ -28,6 +30,8 @@ pub trait ValidTheme:
     + widget::rule::Catalog
     + widgets::text_editor::Catalog
     + widget::checkbox::Catalog
+    + cosmic::widget::svg::Catalog
+    + cosmic::widget::aspect_ratio::Catalog
 {
 }
 
@@ -37,6 +41,8 @@ impl<T> ValidTheme for T where
         + widget::rule::Catalog
         + widgets::text_editor::Catalog
         + widget::checkbox::Catalog
+        + cosmic::widget::svg::Catalog
+        + cosmic::widget::aspect_ratio::Catalog
 {
 }
 
@@ -552,9 +558,11 @@ impl<'a, M: Clone + 'static, T: ValidTheme + 'a> MarkWidget<'a, M, T> {
             self.state.selection_state.get(&code),
             self.fn_update.clone(),
         ) {
+            let code_for_editor = code.clone();
+
             let on_action = move |action| {
                 select(UpdateMsg {
-                    kind: UpdateMsgKind::TextEditor(code.clone(), action),
+                    kind: UpdateMsgKind::TextEditor(code_for_editor.clone(), action),
                 })
             };
 
@@ -565,10 +573,43 @@ impl<'a, M: Clone + 'static, T: ValidTheme + 'a> MarkWidget<'a, M, T> {
                 .font(self.font_mono)
                 .on_action(on_action);
 
-            if let Some(language) = &self.current_code_language {
-                editor.highlight(language, self.code_highlight_theme).into()
+            if let Some(on_copy) = &self.fn_copying_code {
+                    let copy_btn: Element<'a, M, T, cosmic::Renderer>  = widget::mouse_area(
+                        widget::container(
+                                widget::svg(widget::svg::Handle::from_memory(COPY_ICON_BYTES))
+                                    .width(16)
+                                    .height(16)
+                            )
+                            .padding(4)
+                            .width(28)
+                            .height(28)
+                    )
+                    .on_press(on_copy(code))
+                    .interaction(cosmic::iced::mouse::Interaction::Pointer).into();
+
+                    let overlay: Element<'a, M, T, cosmic::Renderer>  = widget::row![
+                        widget::space().width(Length::Fill),
+                        widget::column![
+                            copy_btn,
+                            widget::space().height(Length::Fill),
+                        ]
+                    ]
+                    .padding(8)
+                    .into();
+
+                    let highlighted_editor: Element<'a, M, T, cosmic::Renderer> = if let Some(language) = &self.current_code_language {
+                        editor.highlight(language, self.code_highlight_theme).into()
+                    } else {
+                        editor.into()
+                    };
+
+                    widget::stack![highlighted_editor, overlay].into()
             } else {
-                editor.into()
+                if let Some(language) = &self.current_code_language {
+                    editor.highlight(language, self.code_highlight_theme).into()
+                } else {
+                    editor.into()
+                }
             }
         } else {
             RenderedSpan::Spans(vec![widget::span(code).size(size).font(self.font_mono)])

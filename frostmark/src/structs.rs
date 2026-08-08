@@ -84,6 +84,7 @@ pub enum UpdateMsgKind {
 }
 
 type FClickLink<M> = Box<dyn Fn(String) -> M>;
+type FCopyCode<M> = Arc<dyn Fn(String) -> M>;
 type FDrawImage<'a, M, T> = Box<dyn Fn(ImageInfo) -> Element<'static, M, T> + 'a>;
 type FUpdate<M> = Arc<dyn Fn(UpdateMsg) -> M>;
 pub(crate) type FStyleLinkButton<T> =
@@ -118,6 +119,7 @@ pub struct MarkWidget<'a, Message, Theme = cosmic::iced::Theme> {
     pub(crate) heading_scale: f32,
 
     pub(crate) fn_clicking_link: Option<FClickLink<Message>>,
+    pub(crate) fn_copying_code: Option<FCopyCode<Message>>,
     pub(crate) fn_drawing_image: Option<FDrawImage<'a, Message, Theme>>,
     pub(crate) fn_update: Option<FUpdate<Message>>,
     pub(crate) fn_style_link_button: Option<FStyleLinkButton<Theme>>,
@@ -143,6 +145,7 @@ impl<'a, M: 'a, T: 'a> MarkWidget<'a, M, T> {
             font: Font::DEFAULT,
             font_mono: Font::MONOSPACE,
             fn_clicking_link: None,
+            fn_copying_code: None,
             fn_drawing_image: None,
             fn_update: None,
             fn_style_link_button: None,
@@ -222,6 +225,13 @@ impl<'a, M: 'a, T: 'a> MarkWidget<'a, M, T> {
     #[must_use]
     pub fn on_clicking_link(mut self, f: impl Fn(String) -> M + 'static) -> Self {
         self.fn_clicking_link = Some(Box::new(f));
+        self
+    }
+
+    /// When the user clicks the copy button on a codeblock.
+    #[must_use]
+    pub fn on_copying_code(mut self, f: impl Fn(String) -> M + 'static) -> Self {
+        self.fn_copying_code = Some(Arc::new(f));
         self
     }
 

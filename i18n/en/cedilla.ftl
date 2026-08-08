@@ -8,6 +8,7 @@ move = Move
 move-to = Move To
 open-file-manager = Reveal in File Manager
 name = Name
+copied-to-clipboard = Copied to Clipboard
 
 <#-- About Page -->
 repository = Repository

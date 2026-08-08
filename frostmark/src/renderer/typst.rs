@@ -40,7 +40,7 @@ impl<'a, M: Clone + 'static, T: ValidTheme + 'a> MarkWidget<'a, M, T> {
                  #set text(fill: {}, size: {}pt)\n\
                  {}",
             color_str,
-            &typst_size,
+            typst_size,
             source.trim()
         );
 

@@ -130,6 +130,8 @@ pub enum Message {
     AddToast(CedillaToast),
     /// Opens the given URL in the browser
     LaunchUrl(String),
+    /// Copies some data to the system clipboard
+    CopyToClipboard(String),
     /// Opens (or closes if already open) the given [`ContextPage`]
     ToggleContextPage(ContextPage),
     /// Needed for responsive menu bar
@@ -716,6 +718,7 @@ impl cosmic::Application for AppModel {
             Message::CloseToast(id) => self.handle_close_toast(id),
             Message::AddToast(toast) => self.handle_add_toast(toast),
             Message::LaunchUrl(url) => self.handle_launch_url(url),
+            Message::CopyToClipboard(content) => self.handle_copy_to_clipboard(content),
             Message::ToggleContextPage(page) => self.handle_toggle_context_page(page),
             Message::Surface(a) => self.handle_surface(a),
             Message::Key(modifiers, key) => self.handle_key(modifiers, key),
@@ -1113,6 +1116,7 @@ fn cedilla_main_view<'a>(
                         MarkWidget::new(&preview.markstate)
                             .on_updating_state(Message::UpdateMarkState)
                             .on_clicking_link(Message::LaunchUrl)
+                            .on_copying_code(Message::CopyToClipboard)
                             .font(font)
                             .text_size(app_config.text_size)
                             .code_highlight_theme(highlighter_theme)
