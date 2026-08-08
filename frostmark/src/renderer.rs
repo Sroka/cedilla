@@ -574,21 +574,20 @@ impl<'a, M: Clone + 'static, T: ValidTheme + 'a> MarkWidget<'a, M, T> {
                 .on_action(on_action);
 
             if let Some(on_copy) = &self.fn_copying_code {
-                let icon = widget::svg(widget::svg::Handle::from_memory(COPY_ICON_BYTES))
-                        .width(16)
-                        .height(16);
-
-                    let copy_btn: Element<'a, M, T, cosmic::Renderer> = widget::mouse_area(
-                        widget::container(icon)
+                    let copy_btn: Element<'a, M, T, cosmic::Renderer>  = widget::mouse_area(
+                        widget::container(
+                                widget::svg(widget::svg::Handle::from_memory(COPY_ICON_BYTES))
+                                    .width(16)
+                                    .height(16)
+                            )
                             .padding(4)
                             .width(28)
                             .height(28)
                     )
                     .on_press(on_copy(code))
-                    .interaction(cosmic::iced::mouse::Interaction::Pointer)
-                    .into();
+                    .interaction(cosmic::iced::mouse::Interaction::Pointer).into();
 
-                    let overlay: Element<'a, M, T, cosmic::Renderer> = widget::row![
+                    let overlay: Element<'a, M, T, cosmic::Renderer>  = widget::row![
                         widget::space().width(Length::Fill),
                         widget::column![
                             copy_btn,
