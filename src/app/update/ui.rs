@@ -5,7 +5,7 @@ use crate::app::core::utils::CedillaToast;
 use crate::app::{AppModel, Message};
 use cosmic::iced::core::keyboard::{Key, Modifiers};
 use cosmic::widget::ToastId;
-use cosmic::{prelude::*, surface};
+use cosmic::{iced, prelude::*, surface};
 
 impl AppModel {
     pub fn handle_close_toast(&mut self, id: ToastId) -> Task<cosmic::Action<Message>> {
@@ -25,6 +25,10 @@ impl AppModel {
                 Task::none()
             }
         }
+    }
+
+    pub fn handle_copy_to_clipboard(&mut self, content: String) -> Task<cosmic::Action<Message>> {
+        iced::clipboard::write(content)
     }
 
     pub fn handle_toggle_context_page(

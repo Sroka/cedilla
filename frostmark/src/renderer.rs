@@ -552,9 +552,11 @@ impl<'a, M: Clone + 'static, T: ValidTheme + 'a> MarkWidget<'a, M, T> {
             self.state.selection_state.get(&code),
             self.fn_update.clone(),
         ) {
+            let code_for_editor = code.clone();
+
             let on_action = move |action| {
                 select(UpdateMsg {
-                    kind: UpdateMsgKind::TextEditor(code.clone(), action),
+                    kind: UpdateMsgKind::TextEditor(code_for_editor.clone(), action),
                 })
             };
 
@@ -565,10 +567,32 @@ impl<'a, M: Clone + 'static, T: ValidTheme + 'a> MarkWidget<'a, M, T> {
                 .font(self.font_mono)
                 .on_action(on_action);
 
-            if let Some(language) = &self.current_code_language {
-                editor.highlight(language, self.code_highlight_theme).into()
+            if let Some(on_copy) = &self.fn_copying_code {
+                let copy_btn = widget::button(widget::text("Copy").size(14))
+                    .on_press(on_copy(code))
+                    .padding(4);
+
+                let overlay = widget::row![
+                    widget::space().width(Length::Fill),
+                    widget::column![
+                        copy_btn,
+                        widget::space().height(Length::Fill),
+                    ]
+                ].padding(8);
+
+                let highlighted_editor: Element<'_, _, _> = if let Some(language) = &self.current_code_language {
+                    editor.highlight(language, self.code_highlight_theme).into()
+                } else {
+                    editor.into()
+                };
+
+                widget::stack![highlighted_editor, overlay].into()
             } else {
-                editor.into()
+                if let Some(language) = &self.current_code_language {
+                    editor.highlight(language, self.code_highlight_theme).into()
+                } else {
+                    editor.into()
+                }
             }
         } else {
             RenderedSpan::Spans(vec![widget::span(code).size(size).font(self.font_mono)])
