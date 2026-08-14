@@ -73,6 +73,9 @@ new-file = Nový soubor
 edit = Úpravy
 undo = Zpět
 redo = Znovu
+paste-image = Vložit obrázek
+no-image-clipboard = V schránce nebyl nalezen žádný obrázek
+image-pasted = Obrázek uložen: { $name }
 
 view = Zobrazení
 about = O aplikaci

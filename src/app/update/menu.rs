@@ -45,6 +45,7 @@ impl AppModel {
             }
             MenuAction::Undo => self.handle_undo(),
             MenuAction::Redo => self.handle_redo(),
+            MenuAction::PasteImage => self.handle_paste_image(),
             MenuAction::Search => self.handle_search(utils::search::SearchAction::ToggleSearch),
             MenuAction::CloseCurrentDialog => self.handle_dialog_action(dialogs::DialogAction::DialogCancel),
         }

@@ -74,6 +74,9 @@ new-file = New File
 edit = Edit
 undo = Undo
 redo = Redo
+paste-image = Paste Image
+no-image-clipboard = No image found in clipboard
+image-pasted = Image saved: { $name }
 
 view = View
 about = About

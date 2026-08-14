@@ -191,6 +191,8 @@ pub enum Message {
     Redo,
     /// Search related action requested
     Search(SearchAction),
+    /// Smart paste (pastes images as Markdown or standard text)
+    SmartPaste,
 
     /// Update the HTML renderer state
     UpdateMarkState(UpdateMsg),
@@ -756,6 +758,7 @@ impl cosmic::Application for AppModel {
             Message::Undo => self.handle_undo(),
             Message::Redo => self.handle_redo(),
             Message::Search(action) => self.handle_search(action),
+            Message::SmartPaste => self.handle_smart_paste(),
 
             // Preview / Pane
             Message::UpdateMarkState(msg) => self.handle_update_mark_state(msg),
@@ -1399,7 +1402,9 @@ fn text_editor_key_bindings(key_press: text_editor::KeyPress) -> Option<text_edi
     use text_editor::{Binding, Motion, Status};
 
     let text_editor::KeyPress {
+        key,
         modified_key,
+        physical_key,
         modifiers,
         status,
         ..
@@ -1408,6 +1413,16 @@ fn text_editor_key_bindings(key_press: text_editor::KeyPress) -> Option<text_edi
     // from_key_press() bails out unless focused we better do the same here
     if !matches!(status, Status::Focused { .. }) {
         return None;
+    }
+
+    // Ctrl+P paste image
+    if modifiers.command() && matches!(key.to_latin(*physical_key), Some('p')) {
+        return Some(Binding::Custom(Message::MenuAction(MenuAction::PasteImage)));
+    }
+
+    // Ctrl+V smart paste (image detection or text)
+    if modifiers.command() && !modifiers.alt() && matches!(key.to_latin(*physical_key), Some('v')) {
+        return Some(Binding::Custom(Message::SmartPaste));
     }
 
     // Ctrl+Backspace delete the previous word.
