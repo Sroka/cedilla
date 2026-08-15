@@ -126,6 +126,7 @@ pub fn save_clipboard_image(target_dir: &std::path::Path) -> Result<String, anyw
         .map_err(|e| anywho::anywho!("Failed to access clipboard: {e}"))?;
 
     // 1. Try reading raw image pixel data
+    #[allow(clippy::collapsible_if)]
     if let Ok(img_data) = clipboard.get_image() {
         if let Some(img) = image::ImageBuffer::from_raw(
             img_data.width as u32,
@@ -137,6 +138,7 @@ pub fn save_clipboard_image(target_dir: &std::path::Path) -> Result<String, anyw
     }
 
     // 2. Try reading clipboard text for copied image file paths / URIs (e.g. from file managers)
+    #[allow(clippy::collapsible_if)]
     if let Ok(text) = clipboard.get_text() {
         if let Some(file_name) = copy_image_from_text_path(target_dir, &text)? {
             return Ok(file_name);
@@ -159,6 +161,7 @@ pub fn copy_image_from_text_path(
         }
 
         // Check if it's a web URL for an image
+        #[allow(clippy::collapsible_if)]
         if line.starts_with("http://") || line.starts_with("https://") {
             if let Ok(parsed_url) = url::Url::parse(line) {
                 let path = parsed_url.path();
@@ -181,6 +184,7 @@ pub fn copy_image_from_text_path(
         };
 
         let src_path = std::path::Path::new(&path_str);
+        #[allow(clippy::collapsible_if)]
         if src_path.exists() && src_path.is_file() {
             if let Some(ext) = src_path.extension().and_then(|e| e.to_str()) {
                 let ext_lower = ext.to_lowercase();

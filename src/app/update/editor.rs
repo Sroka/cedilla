@@ -160,6 +160,7 @@ impl AppModel {
         }
 
         // Fall back to standard text paste
+        #[allow(clippy::collapsible_if)]
         if let Ok(mut clipboard) = arboard::Clipboard::new() {
             if let Ok(text) = clipboard.get_text() {
                 let cursor_before = editor.content.cursor().position;
