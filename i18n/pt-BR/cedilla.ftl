@@ -69,6 +69,9 @@ new-file = Novo Arquivo
 edit = Editar
 undo = Desfazer
 redo = Refazer
+paste-image = Colar Imagem
+no-image-clipboard = Nenhuma imagem encontrada na área de transferência
+image-pasted = Imagem salva: { $name }
 
 view = Visualizar
 about = Sobre

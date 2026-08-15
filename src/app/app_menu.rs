@@ -28,6 +28,8 @@ pub enum MenuAction {
     Undo,
     /// Redo
     Redo,
+    /// Paste image from clipboard
+    PasteImage,
     /// Search
     Search,
     /// Close the current open popup dialog
@@ -49,6 +51,7 @@ impl menu::action::MenuAction for MenuAction {
             MenuAction::TogglePreview => Message::MenuAction(MenuAction::TogglePreview),
             MenuAction::Undo => Message::MenuAction(MenuAction::Undo),
             MenuAction::Redo => Message::MenuAction(MenuAction::Redo),
+            MenuAction::PasteImage => Message::MenuAction(MenuAction::PasteImage),
             MenuAction::Search => Message::MenuAction(MenuAction::Search),
             MenuAction::CloseCurrentDialog => Message::MenuAction(MenuAction::CloseCurrentDialog),
         }
@@ -78,6 +81,7 @@ pub fn menu_bar<'a>(key_binds: &HashMap<KeyBind, MenuAction>) -> Element<'a, Mes
                 vec![
                     menu::Item::Button(fl!("undo"), None, MenuAction::Undo),
                     menu::Item::Button(fl!("redo"), None, MenuAction::Redo),
+                    menu::Item::Button(fl!("paste-image"), None, MenuAction::PasteImage),
                     menu::Item::Button(fl!("search"), None, MenuAction::Search),
                 ],
             ),

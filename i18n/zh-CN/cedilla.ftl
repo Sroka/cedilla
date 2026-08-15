@@ -73,6 +73,9 @@ new-file = 新建文件
 edit = 编辑
 undo = 撤销
 redo = 重做
+paste-image = 粘贴图片
+no-image-clipboard = 剪贴板中未找到图片
+image-pasted = 图片已保存：{ $name }
 
 view = 视图
 about = 关于

@@ -73,6 +73,9 @@ new-file = Yeni Dosya
 edit = Düzenle 
 undo = Geri Al 
 redo = Yinele 
+paste-image = Resmi Yapıştır
+no-image-clipboard = Panoda resim bulunamadı
+image-pasted = Resim kaydedildi: { $name }
 
 view = Görünüm 
 about = Hakkında 

@@ -73,6 +73,9 @@ new-file = Ny fil
 edit = Redigera
 undo = Ångra
 redo = Gör om
+paste-image = Klistra in bild
+no-image-clipboard = Ingen bild hittades i urklipp
+image-pasted = Bild sparad: { $name }
 
 view = Visa
 about = Om

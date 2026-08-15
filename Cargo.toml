@@ -35,6 +35,8 @@ icu_locale.workspace = true
 font-kit.workspace = true
 grep.workspace = true
 notify.workspace = true
+arboard.workspace = true
+jiff.workspace = true
 
 # PDF Generation Generation
 gotenberg_pdf.workspace = true
@@ -78,9 +80,11 @@ pulldown-cmark = "0.13.4"
 dissimilar = "1.0.11"
 gotenberg_pdf = { git = "https://github.com/mariinkys/gotenberg_pdf" }
 font-kit = "0.14.3"
-image = { version= "0.25.10", default-features=false }
+image = { version = "0.25.10", default-features = false, features = ["png"] }
 grep = "0.4.1"
 notify = "8.2.0"
+arboard = { version = "3.6.1", features = ["wayland-data-control"] }
+jiff = "0.2"
 
 [workspace.dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic.git"
