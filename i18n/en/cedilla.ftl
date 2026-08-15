@@ -29,6 +29,7 @@ file-changed-externally = The file has been changed externally
 reload = Reload File
 keep-my-version = Keep Current Version
 modified-text = was modified by another program.
+loading-image = Loading image... (if this persists the app may not have permissions to read the file)
 
 <#-- Appearance -->
 appearance = Appearance

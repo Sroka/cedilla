@@ -1143,7 +1143,7 @@ fn cedilla_main_view<'a>(
                                     }
                                     svg.into()
                                 } else {
-                                    "...".into()
+                                    text(fl!("loading-image")).into()
                                 }
                             }),
                     )
