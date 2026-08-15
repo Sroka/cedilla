@@ -142,6 +142,13 @@
   </keywords>
 
   <releases>
+    <release version="0.1.11" date="2026-08-15">
+        <description>
+            <p>Added image pasting support</p>
+            <p>Improved message shown when images do not load</p>
+            <p>Updated dependencies</p>
+        </description>
+    </release>
     <release version="0.1.10" date="2026-08-09">
         <description>
             <p>Added copy button to codeblocks on Preview pane</p>
