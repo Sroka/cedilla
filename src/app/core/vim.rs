@@ -129,8 +129,10 @@ fn handle_normal_mode(
     // Ctrl shortcuts
     if modifiers.control() {
         match key.to_latin(physical_key) {
-            Some('u') | Some('b') => return repeat_motion(vim, Motion::PageUp),
-            Some('d') | Some('f') => return repeat_motion(vim, Motion::PageDown),
+            Some('u') => return repeat_motion_lines(vim, Motion::Up, 15),
+            Some('d') => return repeat_motion_lines(vim, Motion::Down, 15),
+            Some('b') => return repeat_motion_lines(vim, Motion::Up, 30),
+            Some('f') => return repeat_motion_lines(vim, Motion::Down, 30),
             Some('r') => return Some(Binding::Custom(Message::Redo)),
             _ => return None,
         }
@@ -163,8 +165,8 @@ fn handle_normal_mode(
         Key::Named(Named::ArrowDown) => repeat_motion(vim, Motion::Down),
         Key::Named(Named::Home) => repeat_motion(vim, Motion::Home),
         Key::Named(Named::End) => repeat_motion(vim, Motion::End),
-        Key::Named(Named::PageUp) => repeat_motion(vim, Motion::PageUp),
-        Key::Named(Named::PageDown) => repeat_motion(vim, Motion::PageDown),
+        Key::Named(Named::PageUp) => repeat_motion_lines(vim, Motion::Up, 30),
+        Key::Named(Named::PageDown) => repeat_motion_lines(vim, Motion::Down, 30),
         Key::Named(Named::Enter) => repeat_motion(vim, Motion::Down),
         Key::Named(Named::Backspace) => repeat_motion(vim, Motion::Left),
         Key::Named(Named::Tab) => Some(Binding::Sequence(vec![])),
@@ -339,8 +341,10 @@ fn handle_visual_mode(
     // Ctrl shortcuts
     if modifiers.control() {
         match key.to_latin(physical_key) {
-            Some('u') | Some('b') => return repeat_select(vim, Motion::PageUp),
-            Some('d') | Some('f') => return repeat_select(vim, Motion::PageDown),
+            Some('u') => return repeat_select_lines(vim, Motion::Up, 15),
+            Some('d') => return repeat_select_lines(vim, Motion::Down, 15),
+            Some('b') => return repeat_select_lines(vim, Motion::Up, 30),
+            Some('f') => return repeat_select_lines(vim, Motion::Down, 30),
             _ => return None,
         }
     }
@@ -371,8 +375,8 @@ fn handle_visual_mode(
         Key::Named(Named::ArrowDown) => repeat_select(vim, Motion::Down),
         Key::Named(Named::Home) => repeat_select(vim, Motion::Home),
         Key::Named(Named::End) => repeat_select(vim, Motion::End),
-        Key::Named(Named::PageUp) => repeat_select(vim, Motion::PageUp),
-        Key::Named(Named::PageDown) => repeat_select(vim, Motion::PageDown),
+        Key::Named(Named::PageUp) => repeat_select_lines(vim, Motion::Up, 30),
+        Key::Named(Named::PageDown) => repeat_select_lines(vim, Motion::Down, 30),
         Key::Named(Named::Enter) => repeat_select(vim, Motion::Down),
         Key::Named(Named::Backspace) => repeat_select(vim, Motion::Left),
         Key::Named(Named::Tab) => Some(Binding::Sequence(vec![])),
@@ -471,6 +475,16 @@ fn repeat_motion(vim: &mut VimState, motion: Motion) -> Option<Binding<Message>>
     }
 }
 
+fn repeat_motion_lines(
+    vim: &mut VimState,
+    motion: Motion,
+    default_lines: usize,
+) -> Option<Binding<Message>> {
+    let count = vim.count_prefix.take().unwrap_or(1);
+    let total = count * default_lines;
+    Some(Binding::Sequence(vec![Binding::Move(motion); total]))
+}
+
 fn repeat_select(vim: &mut VimState, motion: Motion) -> Option<Binding<Message>> {
     let count = vim.count_prefix.take().unwrap_or(1);
     if count <= 1 {
@@ -478,6 +492,16 @@ fn repeat_select(vim: &mut VimState, motion: Motion) -> Option<Binding<Message>>
     } else {
         Some(Binding::Sequence(vec![Binding::Select(motion); count]))
     }
+}
+
+fn repeat_select_lines(
+    vim: &mut VimState,
+    motion: Motion,
+    default_lines: usize,
+) -> Option<Binding<Message>> {
+    let count = vim.count_prefix.take().unwrap_or(1);
+    let total = count * default_lines;
+    Some(Binding::Sequence(vec![Binding::Select(motion); total]))
 }
 
 #[cfg(test)]
@@ -574,5 +598,27 @@ mod tests {
         let res = handle_vim_key_press(&mut vim, &kpd);
         assert_eq!(vim.mode, VimMode::Normal);
         assert!(matches!(res, Some(Binding::Sequence(_))));
+    }
+
+    #[test]
+    fn test_ctrl_u_ctrl_d_page_motions() {
+        let mut vim = VimState::default();
+        let kpd = make_key_press(Key::Character("d".into()), Modifiers::CTRL);
+        let res = handle_vim_key_press(&mut vim, &kpd);
+        if let Some(Binding::Sequence(seq)) = res {
+            assert_eq!(seq.len(), 15);
+            assert!(matches!(seq[0], Binding::Move(Motion::Down)));
+        } else {
+            panic!("Expected sequence of 15 moves down");
+        }
+
+        let kpu = make_key_press(Key::Character("u".into()), Modifiers::CTRL);
+        let res = handle_vim_key_press(&mut vim, &kpu);
+        if let Some(Binding::Sequence(seq)) = res {
+            assert_eq!(seq.len(), 15);
+            assert!(matches!(seq[0], Binding::Move(Motion::Up)));
+        } else {
+            panic!("Expected sequence of 15 moves up");
+        }
     }
 }

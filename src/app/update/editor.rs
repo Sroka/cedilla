@@ -32,26 +32,25 @@ impl AppModel {
             editor.content.perform(action);
         }
 
-        preview.update_content(editor.content.text().as_ref());
-
         if was_edit {
+            preview.update_content(editor.content.text().as_ref());
             editor.is_dirty = true;
             editor.push_history((cursor_before.line, cursor_before.column));
         }
 
         let sync_preview = self.config.scrollbar_sync == BoolState::Yes;
-        let cursor_task = if was_edit {
-            ensure_cursor_visible(editor, sync_preview)
-        } else {
-            Task::none()
-        };
+        let cursor_task = ensure_cursor_visible(editor, sync_preview);
 
-        utils::images::download_images(
-            &mut preview.markstate,
-            &mut preview.images_in_progress,
-            &editor.path,
-        )
-        .chain(cursor_task)
+        if was_edit {
+            utils::images::download_images(
+                &mut preview.markstate,
+                &mut preview.images_in_progress,
+                &editor.path,
+            )
+            .chain(cursor_task)
+        } else {
+            cursor_task
+        }
     }
 
     pub fn handle_apply_formatting(
@@ -528,22 +527,32 @@ fn ensure_cursor_visible(
     let cursor_line = editor.content.cursor().position.line;
     let content_height = editor_vp.content_bounds().height;
     let viewport_height = editor_vp.bounds().height;
+    let max_scroll = (content_height - viewport_height).max(0.0);
+
+    if max_scroll == 0.0 {
+        return Task::none();
+    }
+
     let line_height = content_height / total_lines as f32;
     let cursor_top = cursor_line as f32 * line_height;
     let cursor_bottom = cursor_top + line_height;
     let scroll_y = editor_vp.absolute_offset().y;
-    let padding = line_height * 3.0;
+    let padding = (line_height * 3.0).min(viewport_height * 0.3);
 
     let new_editor_y = if cursor_top < scroll_y + padding {
         // cursor above visible area
         (cursor_top - padding).max(0.0)
     } else if cursor_bottom > scroll_y + viewport_height - padding {
         // cursor below visible area
-        cursor_bottom + padding - viewport_height
+        (cursor_bottom + padding - viewport_height).min(max_scroll)
     } else {
         // already visible, nothing to do
         return Task::none();
     };
+
+    if (new_editor_y - scroll_y).abs() < 1.0 {
+        return Task::none();
+    }
 
     // scroll editor, marking it as programmatic so it isn't re-synced via on_scroll
     editor.scroll.pending_editor_scrolls += 1;
@@ -554,12 +563,7 @@ fn ensure_cursor_visible(
     if let Some(preview_vp) = editor.scroll.last_preview_viewport
         && sync_preview
     {
-        let editor_scrollable = (content_height - viewport_height).max(0.0);
-        let rel = if editor_scrollable > 0.0 {
-            new_editor_y / editor_scrollable
-        } else {
-            0.0
-        };
+        let rel = new_editor_y / max_scroll;
         let preview_scrollable =
             (preview_vp.content_bounds().height - preview_vp.bounds().height).max(0.0);
         let new_preview_y = (rel * preview_scrollable).max(0.0);
