@@ -1,15 +1,15 @@
-// SPDX-License-Identifier: GPL-3.0
-
 use crate::app::core::editor::{EditorSearchState, EditorState};
 use crate::app::core::utils::search::SearchAction;
 use crate::app::core::utils::{self};
+use crate::app::core::vim::VimMode;
 use crate::app::{
-    AppModel, Message, State, editor_scrollable_id, preview_scrollable_id, search_input_id,
+    AppModel, Message, State, VimAction, editor_scrollable_id, preview_scrollable_id, search_input_id,
     text_editor_id,
 };
-use crate::config::BoolState;
+use crate::config::{BoolState, ConfigInput};
 use cosmic::iced::widget::scrollable::scroll_to;
 use cosmic::prelude::*;
+use cosmic::widget::text_editor::{Cursor, Position};
 use widgets::text_editor;
 
 impl AppModel {
@@ -280,6 +280,237 @@ impl AppModel {
             }
 
             SearchAction::FocusSearchField => cosmic::widget::text_input::focus(search_input_id()),
+        }
+    }
+
+    pub fn handle_toggle_vim_mode(&mut self) -> Task<cosmic::Action<Message>> {
+        let new_state = match self.config.vim_mode {
+            BoolState::Yes => BoolState::No,
+            BoolState::No => BoolState::Yes,
+        };
+        self.handle_config_input(ConfigInput::VimMode(new_state))
+    }
+
+    pub fn handle_vim_action(&mut self, action: VimAction) -> Task<cosmic::Action<Message>> {
+        let State::Ready {
+            editor, preview, ..
+        } = &mut self.state
+        else {
+            return Task::none();
+        };
+
+        let sync_preview = self.config.scrollbar_sync == BoolState::Yes;
+
+        match action {
+            VimAction::SetMode(mode) => {
+                editor.vim.mode = mode;
+                editor.vim.reset_operator_and_count();
+                if mode == VimMode::Normal {
+                    let pos = editor.content.cursor().position;
+                    editor.content.move_to(Cursor {
+                        position: pos,
+                        selection: None,
+                    });
+                }
+                Task::none()
+            }
+            VimAction::Escape => {
+                editor.vim.mode = VimMode::Normal;
+                editor.vim.reset_operator_and_count();
+                let pos = editor.content.cursor().position;
+                editor.content.move_to(Cursor {
+                    position: pos,
+                    selection: None,
+                });
+                Task::none()
+            }
+            VimAction::GoToTop => {
+                editor.content.move_to(Cursor {
+                    position: Position { line: 0, column: 0 },
+                    selection: None,
+                });
+                ensure_cursor_visible(editor, sync_preview)
+            }
+            VimAction::GoToBottom => {
+                let last_line = editor.content.line_count().saturating_sub(1);
+                editor.content.move_to(Cursor {
+                    position: Position {
+                        line: last_line,
+                        column: 0,
+                    },
+                    selection: None,
+                });
+                ensure_cursor_visible(editor, sync_preview)
+            }
+            VimAction::VisualGoToTop => {
+                let anchor = editor
+                    .content
+                    .cursor()
+                    .selection
+                    .unwrap_or(editor.content.cursor().position);
+                editor.content.move_to(Cursor {
+                    position: Position { line: 0, column: 0 },
+                    selection: Some(anchor),
+                });
+                ensure_cursor_visible(editor, sync_preview)
+            }
+            VimAction::VisualGoToBottom => {
+                let anchor = editor
+                    .content
+                    .cursor()
+                    .selection
+                    .unwrap_or(editor.content.cursor().position);
+                let last_line = editor.content.line_count().saturating_sub(1);
+                let last_col = editor
+                    .content
+                    .line(last_line)
+                    .map(|l| l.text.chars().count())
+                    .unwrap_or(0);
+                editor.content.move_to(Cursor {
+                    position: Position {
+                        line: last_line,
+                        column: last_col,
+                    },
+                    selection: Some(anchor),
+                });
+                ensure_cursor_visible(editor, sync_preview)
+            }
+            VimAction::YankLine => {
+                let line_idx = editor.content.cursor().position.line;
+                if let Some(line) = editor.content.line(line_idx) {
+                    let text_to_copy = format!("{}\n", line.text);
+                    editor.vim.last_yank_is_line = true;
+                    editor.vim.mode = VimMode::Normal;
+                    editor.vim.reset_operator_and_count();
+                    self.handle_copy_to_clipboard(text_to_copy)
+                } else {
+                    Task::none()
+                }
+            }
+            VimAction::DeleteLine => {
+                let cursor_line = editor.content.cursor().position.line;
+                let total_lines = editor.content.line_count();
+
+                if let Some(line) = editor.content.line(cursor_line) {
+                    let line_text = format!("{}\n", line.text);
+                    editor.vim.last_yank_is_line = true;
+                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                        let _ = clipboard.set_text(line_text);
+                    }
+                }
+
+                let cursor_before = editor.content.cursor().position;
+
+                if total_lines <= 1 {
+                    editor.content.perform(text_editor::Action::SelectAll);
+                    editor.content.perform(text_editor::Action::Edit(text_editor::Edit::Delete));
+                } else if cursor_line + 1 < total_lines {
+                    editor.content.move_to(Cursor {
+                        position: Position {
+                            line: cursor_line,
+                            column: 0,
+                        },
+                        selection: None,
+                    });
+                    editor.content.move_to(Cursor {
+                        position: Position {
+                            line: cursor_line + 1,
+                            column: 0,
+                        },
+                        selection: Some(Position {
+                            line: cursor_line,
+                            column: 0,
+                        }),
+                    });
+                    editor.content.perform(text_editor::Action::Edit(text_editor::Edit::Delete));
+                } else {
+                    let prev_line = cursor_line - 1;
+                    let prev_len = editor
+                        .content
+                        .line(prev_line)
+                        .map(|l| l.text.chars().count())
+                        .unwrap_or(0);
+                    let cur_len = editor
+                        .content
+                        .line(cursor_line)
+                        .map(|l| l.text.chars().count())
+                        .unwrap_or(0);
+                    editor.content.move_to(Cursor {
+                        position: Position {
+                            line: cursor_line,
+                            column: cur_len,
+                        },
+                        selection: Some(Position {
+                            line: prev_line,
+                            column: prev_len,
+                        }),
+                    });
+                    editor.content.perform(text_editor::Action::Edit(text_editor::Edit::Delete));
+                }
+
+                editor.is_dirty = true;
+                editor.push_history((cursor_before.line, cursor_before.column));
+                preview.update_content(editor.content.text().as_ref());
+                ensure_cursor_visible(editor, sync_preview)
+            }
+            VimAction::Paste { before } => {
+                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                    if let Ok(text) = clipboard.get_text() {
+                        if text.is_empty() {
+                            return Task::none();
+                        }
+                        let is_line = text.ends_with('\n');
+                        let cursor_before = editor.content.cursor().position;
+
+                        if is_line {
+                            if before {
+                                editor
+                                    .content
+                                    .perform(text_editor::Action::Move(text_editor::Motion::Home));
+                                editor
+                                    .content
+                                    .perform(text_editor::Action::Edit(text_editor::Edit::Paste(
+                                        std::sync::Arc::new(text),
+                                    )));
+                            } else {
+                                editor
+                                    .content
+                                    .perform(text_editor::Action::Move(text_editor::Motion::End));
+                                editor
+                                    .content
+                                    .perform(text_editor::Action::Edit(text_editor::Edit::Enter));
+                                editor
+                                    .content
+                                    .perform(text_editor::Action::Edit(text_editor::Edit::Paste(
+                                        std::sync::Arc::new(
+                                            text.trim_end_matches('\n').to_string(),
+                                        ),
+                                    )));
+                            }
+                        } else {
+                            if !before {
+                                editor.content.perform(text_editor::Action::Move(
+                                    text_editor::Motion::Right,
+                                ));
+                            }
+                            editor
+                                .content
+                                .perform(text_editor::Action::Edit(text_editor::Edit::Paste(
+                                    std::sync::Arc::new(text),
+                                )));
+                        }
+
+                        editor.is_dirty = true;
+                        editor.push_history((cursor_before.line, cursor_before.column));
+                        preview.update_content(editor.content.text().as_ref());
+                        ensure_cursor_visible(editor, sync_preview)
+                    } else {
+                        Task::none()
+                    }
+                } else {
+                    Task::none()
+                }
+            }
         }
     }
 }

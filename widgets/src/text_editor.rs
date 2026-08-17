@@ -135,6 +135,7 @@ where
     ellipsize: Ellipsize,
     retain_focus_on_external_click: bool,
     is_code_block: bool,
+    block_cursor: bool,
     class: Theme::Class<'a>,
     key_binding: Option<Box<dyn Fn(KeyPress) -> Option<Binding<Message>> + 'a>>,
     on_edit: Option<Box<dyn Fn(Action) -> Message + 'a>>,
@@ -166,6 +167,7 @@ where
             ellipsize: Ellipsize::default(),
             retain_focus_on_external_click: false,
             is_code_block: false,
+            block_cursor: false,
             class: <Theme as Catalog>::default(),
             key_binding: None,
             on_edit: None,
@@ -320,6 +322,7 @@ where
             ellipsize: self.ellipsize,
             retain_focus_on_external_click: self.retain_focus_on_external_click,
             is_code_block: self.is_code_block,
+            block_cursor: self.block_cursor,
             class: self.class,
             key_binding: self.key_binding,
             on_edit: self.on_edit,
@@ -347,6 +350,13 @@ where
         Theme::Class<'a>: From<StyleFn<'a, Theme>>,
     {
         self.class = (Box::new(style) as StyleFn<'a, Theme>).into();
+        self
+    }
+
+    /// Sets whether to render a block cursor.
+    #[must_use]
+    pub fn block_cursor(mut self, block_cursor: bool) -> Self {
+        self.block_cursor = block_cursor;
         self
     }
 
@@ -1052,14 +1062,19 @@ where
                 if let Some(focus) = state.focus.as_ref()
                     && focus.is_cursor_visible()
                 {
+                    let font_size = self.text_size.unwrap_or_else(|| renderer.default_size());
+                    let cursor_width = if self.block_cursor {
+                        (font_size.0 * 0.6).max(8.0)
+                    } else {
+                        1.0
+                    };
+
                     let cursor = Rectangle::new(
                         position + translation,
                         Size::new(
-                            1.0,
+                            cursor_width,
                             self.line_height
-                                .to_absolute(
-                                    self.text_size.unwrap_or_else(|| renderer.default_size()),
-                                )
+                                .to_absolute(font_size)
                                 .into(),
                         ),
                     );
@@ -1070,7 +1085,14 @@ where
                                 bounds: clipped_cursor,
                                 ..renderer::Quad::default()
                             },
-                            style.value,
+                            if self.block_cursor {
+                                Color {
+                                    a: 0.5,
+                                    ..style.value
+                                }
+                            } else {
+                                style.value
+                            },
                         );
                     }
                 }
