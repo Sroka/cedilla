@@ -313,6 +313,29 @@ impl AppModel {
                 }
                 Task::none()
             }
+            VimAction::SetPendingOperator(op) => {
+                editor.vim.pending_operator = op;
+                Task::none()
+            }
+            VimAction::SetCountPrefix(count) => {
+                editor.vim.count_prefix = count;
+                Task::none()
+            }
+            VimAction::ResetOperatorAndCount => {
+                editor.vim.reset_operator_and_count();
+                Task::none()
+            }
+            VimAction::VisualYank { is_line } => {
+                editor.vim.mode = VimMode::Normal;
+                editor.vim.last_yank_is_line = is_line;
+                editor.vim.reset_operator_and_count();
+                let pos = editor.content.cursor().position;
+                editor.content.move_to(Cursor {
+                    position: pos,
+                    selection: None,
+                });
+                Task::none()
+            }
             VimAction::Escape => {
                 editor.vim.mode = VimMode::Normal;
                 editor.vim.reset_operator_and_count();
@@ -324,6 +347,7 @@ impl AppModel {
                 Task::none()
             }
             VimAction::GoToTop => {
+                editor.vim.reset_operator_and_count();
                 editor.content.move_to(Cursor {
                     position: Position { line: 0, column: 0 },
                     selection: None,
@@ -331,6 +355,7 @@ impl AppModel {
                 ensure_cursor_visible(editor, sync_preview)
             }
             VimAction::GoToBottom => {
+                editor.vim.reset_operator_and_count();
                 let last_line = editor.content.line_count().saturating_sub(1);
                 editor.content.move_to(Cursor {
                     position: Position {
@@ -342,6 +367,7 @@ impl AppModel {
                 ensure_cursor_visible(editor, sync_preview)
             }
             VimAction::VisualGoToTop => {
+                editor.vim.reset_operator_and_count();
                 let anchor = editor
                     .content
                     .cursor()
@@ -354,6 +380,7 @@ impl AppModel {
                 ensure_cursor_visible(editor, sync_preview)
             }
             VimAction::VisualGoToBottom => {
+                editor.vim.reset_operator_and_count();
                 let anchor = editor
                     .content
                     .cursor()
@@ -375,18 +402,19 @@ impl AppModel {
                 ensure_cursor_visible(editor, sync_preview)
             }
             VimAction::YankLine => {
+                editor.vim.reset_operator_and_count();
                 let line_idx = editor.content.cursor().position.line;
                 if let Some(line) = editor.content.line(line_idx) {
                     let text_to_copy = format!("{}\n", line.text);
                     editor.vim.last_yank_is_line = true;
                     editor.vim.mode = VimMode::Normal;
-                    editor.vim.reset_operator_and_count();
                     self.handle_copy_to_clipboard(text_to_copy)
                 } else {
                     Task::none()
                 }
             }
             VimAction::DeleteLine => {
+                editor.vim.reset_operator_and_count();
                 let cursor_line = editor.content.cursor().position.line;
                 let total_lines = editor.content.line_count();
 
@@ -453,6 +481,7 @@ impl AppModel {
                 ensure_cursor_visible(editor, sync_preview)
             }
             VimAction::Paste { before } => {
+                editor.vim.reset_operator_and_count();
                 if let Ok(mut clipboard) = arboard::Clipboard::new() {
                     if let Ok(text) = clipboard.get_text() {
                         if text.is_empty() {

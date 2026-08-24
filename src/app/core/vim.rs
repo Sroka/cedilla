@@ -48,8 +48,11 @@ impl VimState {
 }
 
 /// Translates a key press event in Vim mode into a text editor [`Binding`].
+///
+/// This is a pure function that does not mutate state. Any required state transitions
+/// are returned as messages (`Message::Vim(VimAction::...)`) to be processed by the update function.
 pub fn handle_vim_key_press(
-    vim: &mut VimState,
+    vim: &VimState,
     key_press: &KeyPress,
 ) -> Option<Binding<Message>> {
     let KeyPress {
@@ -69,9 +72,7 @@ pub fn handle_vim_key_press(
     if matches!(modified_key, Key::Named(Named::Escape))
         || (modifiers.control() && matches!(key.to_latin(*physical_key), Some('[')))
     {
-        vim.reset_operator_and_count();
         let was_insert = vim.mode == VimMode::Insert;
-        vim.mode = VimMode::Normal;
 
         return if was_insert {
             Some(Binding::Sequence(vec![
@@ -95,7 +96,7 @@ pub fn handle_vim_key_press(
 }
 
 fn handle_normal_mode(
-    vim: &mut VimState,
+    vim: &VimState,
     key: &Key,
     modified_key: &Key,
     physical_key: keyboard::key::Physical,
@@ -103,23 +104,19 @@ fn handle_normal_mode(
 ) -> Option<Binding<Message>> {
     // Check pending operators first
     if let Some(pending) = vim.pending_operator {
-        vim.pending_operator = None;
         match pending {
             VimPendingOperator::G => {
                 if matches!(key.to_latin(physical_key), Some('g')) {
-                    vim.count_prefix = None;
                     return Some(Binding::Custom(Message::Vim(VimAction::GoToTop)));
                 }
             }
             VimPendingOperator::Y => {
                 if matches!(key.to_latin(physical_key), Some('y')) {
-                    vim.count_prefix = None;
                     return Some(Binding::Custom(Message::Vim(VimAction::YankLine)));
                 }
             }
             VimPendingOperator::D => {
                 if matches!(key.to_latin(physical_key), Some('d')) {
-                    vim.count_prefix = None;
                     return Some(Binding::Custom(Message::Vim(VimAction::DeleteLine)));
                 }
             }
@@ -133,7 +130,16 @@ fn handle_normal_mode(
             Some('d') => return repeat_motion_lines(vim, Motion::Down, 15),
             Some('b') => return repeat_motion_lines(vim, Motion::Up, 30),
             Some('f') => return repeat_motion_lines(vim, Motion::Down, 30),
-            Some('r') => return Some(Binding::Custom(Message::Redo)),
+            Some('r') => {
+                if vim.pending_operator.is_some() || vim.count_prefix.is_some() {
+                    return Some(Binding::Sequence(vec![
+                        Binding::Custom(Message::Redo),
+                        Binding::Custom(Message::Vim(VimAction::ResetOperatorAndCount)),
+                    ]));
+                } else {
+                    return Some(Binding::Custom(Message::Redo));
+                }
+            }
             _ => return None,
         }
     }
@@ -144,17 +150,18 @@ fn handle_normal_mode(
     }
 
     // Digits for count prefix (e.g. 5j, 10w)
-    if !modifiers.control() && !modifiers.alt() && !modifiers.command() {
-        if let Key::Character(s) = key {
-            if let Some(c) = s.chars().next() {
-                if ('1'..='9').contains(&c) || (c == '0' && vim.count_prefix.is_some()) {
-                    let digit = c.to_digit(10).unwrap() as usize;
-                    let new_count = vim.count_prefix.unwrap_or(0) * 10 + digit;
-                    vim.count_prefix = Some(new_count);
-                    return Some(Binding::Sequence(vec![])); // Consume digit keypress
-                }
-            }
-        }
+    if !modifiers.control()
+        && !modifiers.alt()
+        && !modifiers.command()
+        && let Key::Character(s) = key
+        && let Some(c) = s.chars().next()
+        && (('1'..='9').contains(&c) || (c == '0' && vim.count_prefix.is_some()))
+    {
+        let digit = c.to_digit(10).unwrap() as usize;
+        let new_count = vim.count_prefix.unwrap_or(0) * 10 + digit;
+        return Some(Binding::Custom(Message::Vim(VimAction::SetCountPrefix(
+            Some(new_count),
+        ))));
     }
 
     // Single-key commands and motions
@@ -169,7 +176,15 @@ fn handle_normal_mode(
         Key::Named(Named::PageDown) => repeat_motion_lines(vim, Motion::Down, 30),
         Key::Named(Named::Enter) => repeat_motion(vim, Motion::Down),
         Key::Named(Named::Backspace) => repeat_motion(vim, Motion::Left),
-        Key::Named(Named::Tab) => Some(Binding::Sequence(vec![])),
+        Key::Named(Named::Tab) => {
+            if vim.count_prefix.is_some() || vim.pending_operator.is_some() {
+                Some(Binding::Custom(Message::Vim(
+                    VimAction::ResetOperatorAndCount,
+                )))
+            } else {
+                Some(Binding::Sequence(vec![]))
+            }
+        }
         _ => {
             if modifiers.control() || modifiers.alt() || modifiers.command() {
                 return None;
@@ -190,140 +205,142 @@ fn handle_normal_mode(
 
                 // Movement: Line boundaries
                 Some('0') | Some('^') => {
-                    vim.count_prefix = None;
-                    Some(Binding::Move(Motion::Home))
+                    if vim.count_prefix.is_some() || vim.pending_operator.is_some() {
+                        Some(Binding::Sequence(vec![
+                            Binding::Move(Motion::Home),
+                            Binding::Custom(Message::Vim(VimAction::ResetOperatorAndCount)),
+                        ]))
+                    } else {
+                        Some(Binding::Move(Motion::Home))
+                    }
                 }
                 Some('$') => {
-                    vim.count_prefix = None;
-                    Some(Binding::Move(Motion::End))
+                    if vim.count_prefix.is_some() || vim.pending_operator.is_some() {
+                        Some(Binding::Sequence(vec![
+                            Binding::Move(Motion::End),
+                            Binding::Custom(Message::Vim(VimAction::ResetOperatorAndCount)),
+                        ]))
+                    } else {
+                        Some(Binding::Move(Motion::End))
+                    }
                 }
 
                 // Movement: Buffer boundaries
-                Some('g') => {
-                    vim.pending_operator = Some(VimPendingOperator::G);
-                    Some(Binding::Sequence(vec![])) // Wait for second 'g'
-                }
+                Some('g') => Some(Binding::Custom(Message::Vim(
+                    VimAction::SetPendingOperator(Some(VimPendingOperator::G)),
+                ))),
                 Some('G') if modifiers.shift() => {
-                    vim.count_prefix = None;
                     Some(Binding::Custom(Message::Vim(VimAction::GoToBottom)))
                 }
 
                 // Mode Switching: Insert
                 Some('i') => {
-                    vim.reset_operator_and_count();
-                    vim.mode = VimMode::Insert;
-                    Some(Binding::Custom(Message::Vim(VimAction::SetMode(VimMode::Insert))))
+                    Some(Binding::Custom(Message::Vim(VimAction::SetMode(
+                        VimMode::Insert,
+                    ))))
                 }
-                Some('I') if modifiers.shift() => {
-                    vim.reset_operator_and_count();
-                    vim.mode = VimMode::Insert;
-                    Some(Binding::Sequence(vec![
-                        Binding::Move(Motion::Home),
-                        Binding::Custom(Message::Vim(VimAction::SetMode(VimMode::Insert))),
-                    ]))
-                }
-                Some('a') => {
-                    vim.reset_operator_and_count();
-                    vim.mode = VimMode::Insert;
-                    Some(Binding::Sequence(vec![
-                        Binding::Move(Motion::Right),
-                        Binding::Custom(Message::Vim(VimAction::SetMode(VimMode::Insert))),
-                    ]))
-                }
-                Some('A') if modifiers.shift() => {
-                    vim.reset_operator_and_count();
-                    vim.mode = VimMode::Insert;
-                    Some(Binding::Sequence(vec![
-                        Binding::Move(Motion::End),
-                        Binding::Custom(Message::Vim(VimAction::SetMode(VimMode::Insert))),
-                    ]))
-                }
-                Some('o') => {
-                    vim.reset_operator_and_count();
-                    vim.mode = VimMode::Insert;
-                    Some(Binding::Sequence(vec![
-                        Binding::Move(Motion::End),
-                        Binding::Enter,
-                        Binding::Custom(Message::Vim(VimAction::SetMode(VimMode::Insert))),
-                    ]))
-                }
-                Some('O') if modifiers.shift() => {
-                    vim.reset_operator_and_count();
-                    vim.mode = VimMode::Insert;
-                    Some(Binding::Sequence(vec![
-                        Binding::Move(Motion::Home),
-                        Binding::Enter,
-                        Binding::Move(Motion::Up),
-                        Binding::Custom(Message::Vim(VimAction::SetMode(VimMode::Insert))),
-                    ]))
-                }
+                Some('I') if modifiers.shift() => Some(Binding::Sequence(vec![
+                    Binding::Move(Motion::Home),
+                    Binding::Custom(Message::Vim(VimAction::SetMode(VimMode::Insert))),
+                ])),
+                Some('a') => Some(Binding::Sequence(vec![
+                    Binding::Move(Motion::Right),
+                    Binding::Custom(Message::Vim(VimAction::SetMode(VimMode::Insert))),
+                ])),
+                Some('A') if modifiers.shift() => Some(Binding::Sequence(vec![
+                    Binding::Move(Motion::End),
+                    Binding::Custom(Message::Vim(VimAction::SetMode(VimMode::Insert))),
+                ])),
+                Some('o') => Some(Binding::Sequence(vec![
+                    Binding::Move(Motion::End),
+                    Binding::Enter,
+                    Binding::Custom(Message::Vim(VimAction::SetMode(VimMode::Insert))),
+                ])),
+                Some('O') if modifiers.shift() => Some(Binding::Sequence(vec![
+                    Binding::Move(Motion::Home),
+                    Binding::Enter,
+                    Binding::Move(Motion::Up),
+                    Binding::Custom(Message::Vim(VimAction::SetMode(VimMode::Insert))),
+                ])),
 
                 // Mode Switching: Visual
                 Some('v') => {
-                    vim.reset_operator_and_count();
-                    vim.mode = VimMode::Visual;
-                    Some(Binding::Custom(Message::Vim(VimAction::SetMode(VimMode::Visual))))
+                    Some(Binding::Custom(Message::Vim(VimAction::SetMode(
+                        VimMode::Visual,
+                    ))))
                 }
-                Some('V') if modifiers.shift() => {
-                    vim.reset_operator_and_count();
-                    vim.mode = VimMode::VisualLine;
-                    Some(Binding::Sequence(vec![
-                        Binding::SelectLine,
-                        Binding::Custom(Message::Vim(VimAction::SetMode(VimMode::VisualLine))),
-                    ]))
-                }
+                Some('V') if modifiers.shift() => Some(Binding::Sequence(vec![
+                    Binding::SelectLine,
+                    Binding::Custom(Message::Vim(VimAction::SetMode(VimMode::VisualLine))),
+                ])),
 
                 // Copy (Yank)
-                Some('y') => {
-                    vim.pending_operator = Some(VimPendingOperator::Y);
-                    Some(Binding::Sequence(vec![])) // Wait for second 'y'
-                }
+                Some('y') => Some(Binding::Custom(Message::Vim(
+                    VimAction::SetPendingOperator(Some(VimPendingOperator::Y)),
+                ))),
                 Some('Y') if modifiers.shift() => {
-                    vim.reset_operator_and_count();
                     Some(Binding::Custom(Message::Vim(VimAction::YankLine)))
                 }
 
                 // Delete (dd or D)
-                Some('d') => {
-                    vim.pending_operator = Some(VimPendingOperator::D);
-                    Some(Binding::Sequence(vec![])) // Wait for second 'd'
-                }
-                Some('D') if modifiers.shift() => {
-                    vim.reset_operator_and_count();
-                    Some(Binding::Sequence(vec![
-                        Binding::Select(Motion::End),
-                        Binding::Delete,
-                    ]))
-                }
+                Some('d') => Some(Binding::Custom(Message::Vim(
+                    VimAction::SetPendingOperator(Some(VimPendingOperator::D)),
+                ))),
+                Some('D') if modifiers.shift() => Some(Binding::Sequence(vec![
+                    Binding::Select(Motion::End),
+                    Binding::Delete,
+                    Binding::Custom(Message::Vim(VimAction::ResetOperatorAndCount)),
+                ])),
 
                 // Paste (Put)
                 Some('p') => {
-                    vim.reset_operator_and_count();
                     Some(Binding::Custom(Message::Vim(VimAction::Paste { before: false })))
                 }
                 Some('P') if modifiers.shift() => {
-                    vim.reset_operator_and_count();
                     Some(Binding::Custom(Message::Vim(VimAction::Paste { before: true })))
                 }
 
                 // Single character delete / Undo
                 Some('x') => {
-                    vim.reset_operator_and_count();
-                    Some(Binding::Delete)
+                    if vim.count_prefix.is_some() || vim.pending_operator.is_some() {
+                        Some(Binding::Sequence(vec![
+                            Binding::Delete,
+                            Binding::Custom(Message::Vim(VimAction::ResetOperatorAndCount)),
+                        ]))
+                    } else {
+                        Some(Binding::Delete)
+                    }
                 }
                 Some('X') if modifiers.shift() => {
-                    vim.reset_operator_and_count();
-                    Some(Binding::Backspace)
+                    if vim.count_prefix.is_some() || vim.pending_operator.is_some() {
+                        Some(Binding::Sequence(vec![
+                            Binding::Backspace,
+                            Binding::Custom(Message::Vim(VimAction::ResetOperatorAndCount)),
+                        ]))
+                    } else {
+                        Some(Binding::Backspace)
+                    }
                 }
                 Some('u') => {
-                    vim.reset_operator_and_count();
-                    Some(Binding::Custom(Message::Undo))
+                    if vim.count_prefix.is_some() || vim.pending_operator.is_some() {
+                        Some(Binding::Sequence(vec![
+                            Binding::Custom(Message::Undo),
+                            Binding::Custom(Message::Vim(VimAction::ResetOperatorAndCount)),
+                        ]))
+                    } else {
+                        Some(Binding::Custom(Message::Undo))
+                    }
                 }
 
                 // Consume any other character key so NO letters are inserted in Normal mode
                 _ => {
-                    vim.reset_operator_and_count();
-                    Some(Binding::Sequence(vec![]))
+                    if vim.count_prefix.is_some() || vim.pending_operator.is_some() {
+                        Some(Binding::Custom(Message::Vim(
+                            VimAction::ResetOperatorAndCount,
+                        )))
+                    } else {
+                        Some(Binding::Sequence(vec![]))
+                    }
                 }
             }
         }
@@ -331,7 +348,7 @@ fn handle_normal_mode(
 }
 
 fn handle_visual_mode(
-    vim: &mut VimState,
+    vim: &VimState,
     key: &Key,
     modified_key: &Key,
     physical_key: keyboard::key::Physical,
@@ -354,17 +371,18 @@ fn handle_visual_mode(
     }
 
     // Digits for count prefix
-    if !modifiers.control() && !modifiers.alt() && !modifiers.command() {
-        if let Key::Character(s) = key {
-            if let Some(c) = s.chars().next() {
-                if ('1'..='9').contains(&c) || (c == '0' && vim.count_prefix.is_some()) {
-                    let digit = c.to_digit(10).unwrap() as usize;
-                    let new_count = vim.count_prefix.unwrap_or(0) * 10 + digit;
-                    vim.count_prefix = Some(new_count);
-                    return Some(Binding::Sequence(vec![]));
-                }
-            }
-        }
+    if !modifiers.control()
+        && !modifiers.alt()
+        && !modifiers.command()
+        && let Key::Character(s) = key
+        && let Some(c) = s.chars().next()
+        && (('1'..='9').contains(&c) || (c == '0' && vim.count_prefix.is_some()))
+    {
+        let digit = c.to_digit(10).unwrap() as usize;
+        let new_count = vim.count_prefix.unwrap_or(0) * 10 + digit;
+        return Some(Binding::Custom(Message::Vim(VimAction::SetCountPrefix(
+            Some(new_count),
+        ))));
     }
 
     // Single key motions / selections
@@ -379,7 +397,15 @@ fn handle_visual_mode(
         Key::Named(Named::PageDown) => repeat_select_lines(vim, Motion::Down, 30),
         Key::Named(Named::Enter) => repeat_select(vim, Motion::Down),
         Key::Named(Named::Backspace) => repeat_select(vim, Motion::Left),
-        Key::Named(Named::Tab) => Some(Binding::Sequence(vec![])),
+        Key::Named(Named::Tab) => {
+            if vim.count_prefix.is_some() {
+                Some(Binding::Custom(Message::Vim(
+                    VimAction::ResetOperatorAndCount,
+                )))
+            } else {
+                Some(Binding::Sequence(vec![]))
+            }
+        }
         _ => {
             if modifiers.control() || modifiers.alt() || modifiers.command() {
                 return None;
@@ -400,108 +426,144 @@ fn handle_visual_mode(
 
                 // Movement: Line boundaries
                 Some('0') | Some('^') => {
-                    vim.count_prefix = None;
-                    Some(Binding::Select(Motion::Home))
+                    if vim.count_prefix.is_some() {
+                        Some(Binding::Sequence(vec![
+                            Binding::Select(Motion::Home),
+                            Binding::Custom(Message::Vim(VimAction::ResetOperatorAndCount)),
+                        ]))
+                    } else {
+                        Some(Binding::Select(Motion::Home))
+                    }
                 }
                 Some('$') => {
-                    vim.count_prefix = None;
-                    Some(Binding::Select(Motion::End))
+                    if vim.count_prefix.is_some() {
+                        Some(Binding::Sequence(vec![
+                            Binding::Select(Motion::End),
+                            Binding::Custom(Message::Vim(VimAction::ResetOperatorAndCount)),
+                        ]))
+                    } else {
+                        Some(Binding::Select(Motion::End))
+                    }
                 }
 
                 // Movement: Buffer boundaries
-                Some('g') => {
-                    vim.count_prefix = None;
-                    Some(Binding::Custom(Message::Vim(VimAction::VisualGoToTop)))
-                }
+                Some('g') => Some(Binding::Custom(Message::Vim(VimAction::VisualGoToTop))),
                 Some('G') if modifiers.shift() => {
-                    vim.count_prefix = None;
                     Some(Binding::Custom(Message::Vim(VimAction::VisualGoToBottom)))
                 }
 
                 // Copy (Yank) selected text
-                Some('y') | Some('Y') => {
-                    vim.reset_operator_and_count();
-                    vim.mode = VimMode::Normal;
-                    vim.last_yank_is_line = is_line;
-                    Some(Binding::Sequence(vec![
-                        Binding::Copy,
-                        Binding::Custom(Message::Vim(VimAction::SetMode(VimMode::Normal))),
-                    ]))
-                }
+                Some('y') | Some('Y') => Some(Binding::Sequence(vec![
+                    Binding::Copy,
+                    Binding::Custom(Message::Vim(VimAction::VisualYank { is_line })),
+                ])),
 
                 // Delete selected text
-                Some('d') | Some('D') | Some('x') | Some('X') => {
-                    vim.reset_operator_and_count();
-                    vim.mode = VimMode::Normal;
-                    Some(Binding::Sequence(vec![
-                        Binding::Delete,
-                        Binding::Custom(Message::Vim(VimAction::SetMode(VimMode::Normal))),
-                    ]))
-                }
+                Some('d') | Some('D') | Some('x') | Some('X') => Some(Binding::Sequence(vec![
+                    Binding::Delete,
+                    Binding::Custom(Message::Vim(VimAction::SetMode(VimMode::Normal))),
+                ])),
 
                 // Paste (Replace selection with clipboard text)
-                Some('p') | Some('P') => {
-                    vim.reset_operator_and_count();
-                    vim.mode = VimMode::Normal;
-                    Some(Binding::Sequence(vec![
-                        Binding::Paste,
-                        Binding::Custom(Message::Vim(VimAction::SetMode(VimMode::Normal))),
-                    ]))
-                }
+                Some('p') | Some('P') => Some(Binding::Sequence(vec![
+                    Binding::Paste,
+                    Binding::Custom(Message::Vim(VimAction::SetMode(VimMode::Normal))),
+                ])),
 
                 // Toggle back to Normal mode on 'v' or 'V'
                 Some('v') | Some('V') => {
-                    vim.reset_operator_and_count();
-                    vim.mode = VimMode::Normal;
                     Some(Binding::Custom(Message::Vim(VimAction::Escape)))
                 }
 
                 // Consume any other character key so NO letters are inserted in Visual mode
                 _ => {
-                    vim.reset_operator_and_count();
-                    Some(Binding::Sequence(vec![]))
+                    if vim.count_prefix.is_some() {
+                        Some(Binding::Custom(Message::Vim(
+                            VimAction::ResetOperatorAndCount,
+                        )))
+                    } else {
+                        Some(Binding::Sequence(vec![]))
+                    }
                 }
             }
         }
     }
 }
 
-fn repeat_motion(vim: &mut VimState, motion: Motion) -> Option<Binding<Message>> {
-    let count = vim.count_prefix.take().unwrap_or(1);
+fn repeat_motion(vim: &VimState, motion: Motion) -> Option<Binding<Message>> {
+    let count = vim.count_prefix.unwrap_or(1);
     if count <= 1 {
-        Some(Binding::Move(motion))
+        if vim.count_prefix.is_some() || vim.pending_operator.is_some() {
+            Some(Binding::Sequence(vec![
+                Binding::Move(motion),
+                Binding::Custom(Message::Vim(VimAction::ResetOperatorAndCount)),
+            ]))
+        } else {
+            Some(Binding::Move(motion))
+        }
     } else {
-        Some(Binding::Sequence(vec![Binding::Move(motion); count]))
+        let mut seq = vec![Binding::Move(motion); count];
+        seq.push(Binding::Custom(Message::Vim(
+            VimAction::ResetOperatorAndCount,
+        )));
+        Some(Binding::Sequence(seq))
     }
 }
 
 fn repeat_motion_lines(
-    vim: &mut VimState,
+    vim: &VimState,
     motion: Motion,
     default_lines: usize,
 ) -> Option<Binding<Message>> {
-    let count = vim.count_prefix.take().unwrap_or(1);
+    let count = vim.count_prefix.unwrap_or(1);
     let total = count * default_lines;
-    Some(Binding::Sequence(vec![Binding::Move(motion); total]))
+    if vim.count_prefix.is_some() || vim.pending_operator.is_some() {
+        let mut seq = vec![Binding::Move(motion); total];
+        seq.push(Binding::Custom(Message::Vim(
+            VimAction::ResetOperatorAndCount,
+        )));
+        Some(Binding::Sequence(seq))
+    } else {
+        Some(Binding::Sequence(vec![Binding::Move(motion); total]))
+    }
 }
 
-fn repeat_select(vim: &mut VimState, motion: Motion) -> Option<Binding<Message>> {
-    let count = vim.count_prefix.take().unwrap_or(1);
+fn repeat_select(vim: &VimState, motion: Motion) -> Option<Binding<Message>> {
+    let count = vim.count_prefix.unwrap_or(1);
     if count <= 1 {
-        Some(Binding::Select(motion))
+        if vim.count_prefix.is_some() || vim.pending_operator.is_some() {
+            Some(Binding::Sequence(vec![
+                Binding::Select(motion),
+                Binding::Custom(Message::Vim(VimAction::ResetOperatorAndCount)),
+            ]))
+        } else {
+            Some(Binding::Select(motion))
+        }
     } else {
-        Some(Binding::Sequence(vec![Binding::Select(motion); count]))
+        let mut seq = vec![Binding::Select(motion); count];
+        seq.push(Binding::Custom(Message::Vim(
+            VimAction::ResetOperatorAndCount,
+        )));
+        Some(Binding::Sequence(seq))
     }
 }
 
 fn repeat_select_lines(
-    vim: &mut VimState,
+    vim: &VimState,
     motion: Motion,
     default_lines: usize,
 ) -> Option<Binding<Message>> {
-    let count = vim.count_prefix.take().unwrap_or(1);
+    let count = vim.count_prefix.unwrap_or(1);
     let total = count * default_lines;
-    Some(Binding::Sequence(vec![Binding::Select(motion); total]))
+    if vim.count_prefix.is_some() || vim.pending_operator.is_some() {
+        let mut seq = vec![Binding::Select(motion); total];
+        seq.push(Binding::Custom(Message::Vim(
+            VimAction::ResetOperatorAndCount,
+        )));
+        Some(Binding::Sequence(seq))
+    } else {
+        Some(Binding::Sequence(vec![Binding::Select(motion); total]))
+    }
 }
 
 #[cfg(test)]
@@ -513,7 +575,9 @@ mod tests {
         KeyPress {
             key: key.clone(),
             modified_key: key,
-            physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
+            physical_key: keyboard::key::Physical::Unidentified(
+                keyboard::key::NativeCode::Unidentified,
+            ),
             modifiers,
             text: None,
             status: Status::Focused { is_hovered: true },
@@ -522,89 +586,138 @@ mod tests {
 
     #[test]
     fn test_normal_mode_motions() {
-        let mut vim = VimState::default();
+        let vim = VimState::default();
         let kp = make_key_press(Key::Character("j".into()), Modifiers::default());
-        let res = handle_vim_key_press(&mut vim, &kp);
+        let res = handle_vim_key_press(&vim, &kp);
         assert!(matches!(res, Some(Binding::Move(Motion::Down))));
     }
 
     #[test]
     fn test_count_prefix_motion() {
-        let mut vim = VimState::default();
+        let vim = VimState::default();
         let kp5 = make_key_press(Key::Character("5".into()), Modifiers::default());
-        let _ = handle_vim_key_press(&mut vim, &kp5);
-        assert_eq!(vim.count_prefix, Some(5));
+        let res1 = handle_vim_key_press(&vim, &kp5);
+        assert!(matches!(
+            res1,
+            Some(Binding::Custom(Message::Vim(VimAction::SetCountPrefix(Some(5)))))
+        ));
 
+        let vim_with_count = VimState {
+            count_prefix: Some(5),
+            ..Default::default()
+        };
         let kpj = make_key_press(Key::Character("j".into()), Modifiers::default());
-        let res = handle_vim_key_press(&mut vim, &kpj);
-        if let Some(Binding::Sequence(seq)) = res {
-            assert_eq!(seq.len(), 5);
+        let res2 = handle_vim_key_press(&vim_with_count, &kpj);
+        if let Some(Binding::Sequence(seq)) = res2 {
+            assert_eq!(seq.len(), 6);
             assert!(matches!(seq[0], Binding::Move(Motion::Down)));
+            assert!(matches!(
+                seq[5],
+                Binding::Custom(Message::Vim(VimAction::ResetOperatorAndCount))
+            ));
         } else {
-            panic!("Expected sequence of 5 moves");
+            panic!("Expected sequence of 5 moves + reset");
         }
-        assert_eq!(vim.count_prefix, None);
     }
 
     #[test]
     fn test_mode_transitions() {
-        let mut vim = VimState::default();
+        let vim = VimState::default();
         let kpi = make_key_press(Key::Character("i".into()), Modifiers::default());
-        let _ = handle_vim_key_press(&mut vim, &kpi);
-        assert_eq!(vim.mode, VimMode::Insert);
+        let res = handle_vim_key_press(&vim, &kpi);
+        assert!(matches!(
+            res,
+            Some(Binding::Custom(Message::Vim(VimAction::SetMode(
+                VimMode::Insert
+            ))))
+        ));
 
+        let vim_insert = VimState {
+            mode: VimMode::Insert,
+            ..Default::default()
+        };
         let kpesc = make_key_press(Key::Named(Named::Escape), Modifiers::default());
-        let _ = handle_vim_key_press(&mut vim, &kpesc);
-        assert_eq!(vim.mode, VimMode::Normal);
+        let res_esc = handle_vim_key_press(&vim_insert, &kpesc);
+        assert!(matches!(res_esc, Some(Binding::Sequence(_))));
     }
 
     #[test]
     fn test_visual_mode_yank() {
-        let mut vim = VimState::default();
-        vim.mode = VimMode::Visual;
+        let vim = VimState {
+            mode: VimMode::Visual,
+            ..Default::default()
+        };
         let kpy = make_key_press(Key::Character("y".into()), Modifiers::default());
-        let res = handle_vim_key_press(&mut vim, &kpy);
-        assert_eq!(vim.mode, VimMode::Normal);
-        assert!(matches!(res, Some(Binding::Sequence(_))));
+        let res = handle_vim_key_press(&vim, &kpy);
+        if let Some(Binding::Sequence(seq)) = res {
+            assert_eq!(seq.len(), 2);
+            assert!(matches!(seq[0], Binding::Copy));
+            assert!(matches!(
+                seq[1],
+                Binding::Custom(Message::Vim(VimAction::VisualYank { is_line: false }))
+            ));
+        } else {
+            panic!("Expected sequence of Copy + VisualYank");
+        }
     }
 
     #[test]
     fn test_normal_mode_dd_deletes_line() {
-        let mut vim = VimState::default();
+        let vim = VimState::default();
         let kpd = make_key_press(Key::Character("d".into()), Modifiers::default());
-        let res1 = handle_vim_key_press(&mut vim, &kpd);
-        assert!(matches!(res1, Some(Binding::Sequence(seq)) if seq.is_empty()));
-        assert_eq!(vim.pending_operator, Some(VimPendingOperator::D));
+        let res1 = handle_vim_key_press(&vim, &kpd);
+        assert!(matches!(
+            res1,
+            Some(Binding::Custom(Message::Vim(
+                VimAction::SetPendingOperator(Some(VimPendingOperator::D))
+            )))
+        ));
 
-        let res2 = handle_vim_key_press(&mut vim, &kpd);
-        assert!(matches!(res2, Some(Binding::Custom(Message::Vim(VimAction::DeleteLine)))));
-        assert_eq!(vim.pending_operator, None);
+        let vim_pending = VimState {
+            pending_operator: Some(VimPendingOperator::D),
+            ..Default::default()
+        };
+        let res2 = handle_vim_key_press(&vim_pending, &kpd);
+        assert!(matches!(
+            res2,
+            Some(Binding::Custom(Message::Vim(VimAction::DeleteLine)))
+        ));
     }
 
     #[test]
     fn test_normal_mode_unhandled_letters_consumed() {
-        let mut vim = VimState::default();
+        let vim = VimState::default();
         let kpz = make_key_press(Key::Character("z".into()), Modifiers::default());
-        let res = handle_vim_key_press(&mut vim, &kpz);
+        let res = handle_vim_key_press(&vim, &kpz);
         // Unhandled letters must return an empty sequence to consume the key without inserting text
         assert!(matches!(res, Some(Binding::Sequence(seq)) if seq.is_empty()));
     }
 
     #[test]
     fn test_visual_mode_delete() {
-        let mut vim = VimState::default();
-        vim.mode = VimMode::Visual;
+        let vim = VimState {
+            mode: VimMode::Visual,
+            ..Default::default()
+        };
         let kpd = make_key_press(Key::Character("d".into()), Modifiers::default());
-        let res = handle_vim_key_press(&mut vim, &kpd);
-        assert_eq!(vim.mode, VimMode::Normal);
-        assert!(matches!(res, Some(Binding::Sequence(_))));
+        let res = handle_vim_key_press(&vim, &kpd);
+        if let Some(Binding::Sequence(seq)) = res {
+            assert_eq!(seq.len(), 2);
+            assert!(matches!(seq[0], Binding::Delete));
+            assert!(matches!(
+                seq[1],
+                Binding::Custom(Message::Vim(VimAction::SetMode(VimMode::Normal)))
+            ));
+        } else {
+            panic!("Expected sequence of Delete + SetMode");
+        }
     }
 
     #[test]
     fn test_ctrl_u_ctrl_d_page_motions() {
-        let mut vim = VimState::default();
+        let vim = VimState::default();
         let kpd = make_key_press(Key::Character("d".into()), Modifiers::CTRL);
-        let res = handle_vim_key_press(&mut vim, &kpd);
+        let res = handle_vim_key_press(&vim, &kpd);
         if let Some(Binding::Sequence(seq)) = res {
             assert_eq!(seq.len(), 15);
             assert!(matches!(seq[0], Binding::Move(Motion::Down)));
@@ -613,12 +726,98 @@ mod tests {
         }
 
         let kpu = make_key_press(Key::Character("u".into()), Modifiers::CTRL);
-        let res = handle_vim_key_press(&mut vim, &kpu);
+        let res = handle_vim_key_press(&vim, &kpu);
         if let Some(Binding::Sequence(seq)) = res {
             assert_eq!(seq.len(), 15);
             assert!(matches!(seq[0], Binding::Move(Motion::Up)));
         } else {
             panic!("Expected sequence of 15 moves up");
+        }
+    }
+
+    #[test]
+    fn test_normal_mode_gg_goto_top() {
+        let vim = VimState::default();
+        let kpg = make_key_press(Key::Character("g".into()), Modifiers::default());
+        let res1 = handle_vim_key_press(&vim, &kpg);
+        assert!(matches!(
+            res1,
+            Some(Binding::Custom(Message::Vim(
+                VimAction::SetPendingOperator(Some(VimPendingOperator::G))
+            )))
+        ));
+
+        let vim_pending = VimState {
+            pending_operator: Some(VimPendingOperator::G),
+            ..Default::default()
+        };
+        let res2 = handle_vim_key_press(&vim_pending, &kpg);
+        assert!(matches!(
+            res2,
+            Some(Binding::Custom(Message::Vim(VimAction::GoToTop)))
+        ));
+    }
+
+    #[test]
+    fn test_normal_mode_yy_yank_line() {
+        let vim = VimState::default();
+        let kpy = make_key_press(Key::Character("y".into()), Modifiers::default());
+        let res1 = handle_vim_key_press(&vim, &kpy);
+        assert!(matches!(
+            res1,
+            Some(Binding::Custom(Message::Vim(
+                VimAction::SetPendingOperator(Some(VimPendingOperator::Y))
+            )))
+        ));
+
+        let vim_pending = VimState {
+            pending_operator: Some(VimPendingOperator::Y),
+            ..Default::default()
+        };
+        let res2 = handle_vim_key_press(&vim_pending, &kpy);
+        assert!(matches!(
+            res2,
+            Some(Binding::Custom(Message::Vim(VimAction::YankLine)))
+        ));
+    }
+
+    #[test]
+    fn test_normal_mode_zero_vs_count_prefix() {
+        let vim = VimState::default();
+        let kp0 = make_key_press(Key::Character("0".into()), Modifiers::default());
+        let res0 = handle_vim_key_press(&vim, &kp0);
+        // '0' alone moves to Home
+        assert!(matches!(res0, Some(Binding::Move(Motion::Home))));
+
+        // '1' followed by '0' sets count to 10
+        let vim_with_1 = VimState {
+            count_prefix: Some(1),
+            ..Default::default()
+        };
+        let res10 = handle_vim_key_press(&vim_with_1, &kp0);
+        assert!(matches!(
+            res10,
+            Some(Binding::Custom(Message::Vim(VimAction::SetCountPrefix(Some(10)))))
+        ));
+    }
+
+    #[test]
+    fn test_pending_operator_cancelled_by_motion() {
+        let vim = VimState {
+            pending_operator: Some(VimPendingOperator::D),
+            ..Default::default()
+        };
+        let kpj = make_key_press(Key::Character("j".into()), Modifiers::default());
+        let res = handle_vim_key_press(&vim, &kpj);
+        if let Some(Binding::Sequence(seq)) = res {
+            assert_eq!(seq.len(), 2);
+            assert!(matches!(seq[0], Binding::Move(Motion::Down)));
+            assert!(matches!(
+                seq[1],
+                Binding::Custom(Message::Vim(VimAction::ResetOperatorAndCount))
+            ));
+        } else {
+            panic!("Expected sequence of Move + ResetOperatorAndCount");
         }
     }
 }

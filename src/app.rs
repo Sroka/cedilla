@@ -39,11 +39,15 @@ pub mod core;
 mod dialogs;
 mod update;
 
-pub use core::vim::VimMode;
+pub use core::vim::{VimMode, VimPendingOperator};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VimAction {
     SetMode(VimMode),
+    SetPendingOperator(Option<VimPendingOperator>),
+    SetCountPrefix(Option<usize>),
+    ResetOperatorAndCount,
+    VisualYank { is_line: bool },
     Escape,
     GoToTop,
     GoToBottom,
@@ -1076,7 +1080,7 @@ fn cedilla_main_view<'a>(
                     editor.vim.mode,
                     VimMode::Normal | VimMode::Visual | VimMode::VisualLine
                 );
-            let vim_state = std::cell::RefCell::new(editor.vim.clone());
+            let vim_state = editor.vim.clone();
 
             scrollable(
                 TextEditor::new(&editor.content)
@@ -1095,12 +1099,11 @@ fn cedilla_main_view<'a>(
                         |highlight, _theme| highlight.to_format(),
                     )
                     .key_binding(move |key_press| {
-                        if is_vim {
-                            if let Some(binding) =
-                                core::vim::handle_vim_key_press(&mut vim_state.borrow_mut(), &key_press)
-                            {
-                                return Some(binding);
-                            }
+                        if is_vim
+                            && let Some(binding) =
+                                core::vim::handle_vim_key_press(&vim_state, &key_press)
+                        {
+                            return Some(binding);
                         }
                         text_editor_key_bindings(key_press)
                     })
