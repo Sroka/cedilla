@@ -1080,12 +1080,14 @@ fn cedilla_main_view<'a>(
                     editor.vim.mode,
                     VimMode::Normal | VimMode::Visual | VimMode::VisualLine
                 );
+            let enable_ime = !is_vim || editor.vim.mode == VimMode::Insert;
             let vim_state = editor.vim.clone();
 
             scrollable(
                 TextEditor::new(&editor.content)
                     .id(text_editor_id())
                     .block_cursor(is_block_cursor)
+                    .enable_input_method(enable_ime)
                     .highlight_with::<highlighter::Highlighter>(
                         highlighter::Settings {
                             theme: highlighter_theme,
